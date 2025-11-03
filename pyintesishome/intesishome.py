@@ -42,6 +42,11 @@ class IntesisHome(IntesisBase):
     async def _parse_response(self, decoded_data):
         _LOGGER.debug("%s API Received: %s", self._device_type, decoded_data)
         resp = json.loads(decoded_data)
+        # Ensure any pending command awaiters are released before invoking callbacks
+        if not self._received_response.is_set():
+            _LOGGER.debug("Setting _received_response event")
+            self._received_response.set()
+
         # Parse response
         if resp["command"] == "connect_rsp":
             # New connection success
@@ -67,10 +72,6 @@ class IntesisHome(IntesisBase):
             self._update_rssi(resp["data"]["deviceId"], resp["data"]["value"])
         else:
             _LOGGER.debug("Unexpected command received: %s", resp["command"])
-        # Ensure the _received_response event is set
-        if not self._received_response.is_set():
-            _LOGGER.debug("Setting _received_response event")
-            self._received_response.set()
         return
 
     async def _send_keepalive(self):
