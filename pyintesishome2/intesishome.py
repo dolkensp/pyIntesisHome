@@ -78,12 +78,25 @@ class IntesisHome(IntesisBase):
         try:
             while True:
                 await asyncio.sleep(120)
-                _LOGGER.debug("sending keepalive to {self._device_type}")
-                device_id = str(next(iter(self._devices)))
+                if not self._connected:
+                    _LOGGER.debug("Stopping keepalive task because connection is inactive")
+                    break
+                if not self._writer or self._writer.is_closing():
+                    _LOGGER.warning("Keepalive aborted because writer is not available")
+                    break
+                if not self._devices:
+                    _LOGGER.debug("No devices registered; skipping keepalive ping")
+                    continue
+                _LOGGER.debug("sending keepalive to %s", self._device_type)
+                try:
+                    device_id = str(next(iter(self._devices)))
+                except StopIteration:
+                    _LOGGER.debug("No device id available for keepalive")
+                    continue
                 message = (
                     f'{{"command":"get","data":{{"deviceId":{device_id},"uid":10}}}}'
                 )
-                await self._send_command(message)
+                await self._send_command(message, wait_for_response=False)
         except asyncio.CancelledError:
             _LOGGER.debug("Cancelled the keepalive task")
 
