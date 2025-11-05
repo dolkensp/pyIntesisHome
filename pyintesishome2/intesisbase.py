@@ -81,6 +81,9 @@ class IntesisBase:
             if not self._writer or self._writer.is_closing():
                 _LOGGER.error("No writer available. Cannot send command.")
                 self._connected = False
+                await self.stop()
+                if wait_for_response:
+                    self._received_response.set()
                 return
             _LOGGER.debug("Writer state: %r", self._writer)
             encoded_command = command.encode("ascii")
@@ -105,6 +108,8 @@ class IntesisBase:
                 _LOGGER.debug("Response event set! Command succeeded.")
             else:
                 _LOGGER.error("Response event was never set. Command failed.")
+        except asyncio.CancelledError:
+            raise
         except OSError as exc:
             _LOGGER.error("%s Exception. %s / %s", type(exc), exc.args, exc)
         except Exception as exc:
@@ -213,6 +218,7 @@ class IntesisBase:
     async def stop(self):
         """Public method for shutting down connectivity."""
         self._connected = False
+        self._connecting = False
         await self._cancel_task_if_exists(self._receive_task)
         self._receive_task = None
         await self._cancel_task_if_exists(self._keepalive_task)
