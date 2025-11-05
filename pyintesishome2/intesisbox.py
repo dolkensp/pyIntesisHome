@@ -167,7 +167,13 @@ class IntesisBox(IntesisBase):
         try:
             while True:
                 await asyncio.sleep(30)
-                await self._send_command("GET,1:AMBTEMP")
+                if not self._connected:
+                    _LOGGER.debug("Stopping keepalive task because connection is inactive")
+                    break
+                if not self._writer or self._writer.is_closing():
+                    _LOGGER.warning("Keepalive aborted because writer is not available")
+                    break
+                await self._send_command("GET,1:AMBTEMP", wait_for_response=False)
         except asyncio.CancelledError:
             _LOGGER.debug("Cancelled the keepalive task")
 

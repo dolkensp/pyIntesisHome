@@ -73,18 +73,23 @@ class IntesisBase:
         """Internal method to send a value to the device."""
         raise NotImplementedError()
 
-    async def _send_command(self, command: str):
+    async def _send_command(self, command: str, *, wait_for_response: bool = True):
         try:
             _LOGGER.debug("Preparing to send command: %s", command)
-            self._received_response.clear()
-            if not self._writer:
+            if wait_for_response:
+                self._received_response.clear()
+            if not self._writer or self._writer.is_closing():
                 _LOGGER.error("No writer available. Cannot send command.")
+                self._connected = False
                 return
             _LOGGER.debug("Writer state: %r", self._writer)
             encoded_command = command.encode("ascii")
             _LOGGER.debug("Encoded command: %r (length: %d)", encoded_command, len(encoded_command))
             self._writer.write(encoded_command)
             await self._writer.drain()
+            if not wait_for_response:
+                _LOGGER.debug("Command sent without waiting for response.")
+                return
             _LOGGER.debug("Command sent and drained. Waiting for response event.")
             timeout = 15.0
             start_time = asyncio.get_event_loop().time()
@@ -161,6 +166,18 @@ class IntesisBase:
         finally:
             self._connected = False
             self._connecting = False
+            if self._keepalive_task:
+                await self._cancel_task_if_exists(self._keepalive_task)
+                self._keepalive_task = None
+            if self._writer:
+                self._writer.close()
+                try:
+                    await self._writer.wait_closed()
+                except Exception as exc:  # pylint: disable=broad-except
+                    _LOGGER.debug("Error while waiting for writer to close: %s", exc)
+                self._writer = None
+            self._reader = None
+            self._receive_task = None
             await self._send_update_callback()
 
     def _update_device_state(self, device_id, uid, value):
@@ -197,7 +214,9 @@ class IntesisBase:
         """Public method for shutting down connectivity."""
         self._connected = False
         await self._cancel_task_if_exists(self._receive_task)
+        self._receive_task = None
         await self._cancel_task_if_exists(self._keepalive_task)
+        self._keepalive_task = None
         if self._writer:
             self._writer.close()
             await self._writer.wait_closed()
