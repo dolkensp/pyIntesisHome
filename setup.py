@@ -9,7 +9,7 @@ long_description = (this_directory / "README.md").read_text()
 
 setup(
     name="pyintesishome2",
-    version="1.8.8",
+    version="1.8.9",
     description="A python3 library for running asynchronus communications with IntesisHome Smart AC Controllers",
     long_description=long_description,
     long_description_content_type="text/markdown",
