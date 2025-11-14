@@ -102,58 +102,57 @@ class IntesisHome(IntesisBase):
 
     async def connect(self):
         """Public method for connecting to IntesisHome/Airconwithme API"""
-        if not self._connected and not self._connecting:
-            self._connecting = True
-            self._connection_retries = 0
+        if self._connected or self._connecting:
+            return
 
-            self._devices = {}
-            await self._cancel_task_if_exists(self._receive_task)
+        self._connecting = True
+        self._connection_retries = 0
+        self._devices = {}
+        await self._cancel_task_if_exists(self._receive_task)
 
-            try:
-                self._auth_token = await self.poll_status()
-            except IHAuthenticationError as exc:
-                _LOGGER.error("Error connecting to IntesisHome API: %s", exc)
-                raise IHAuthenticationError from exc
-            except IHConnectionError as exc:
-                _LOGGER.error("Error connecting to IntesisHome API: %s", exc)
-                raise IHConnectionError from exc
+        try:
+            self._auth_token = await self._request_auth_token()
+            await self._open_command_channel()
+        finally:
+            self._connecting = False
 
-            _LOGGER.debug(
-                "Opening connection to %s API at %s:%i",
-                self._device_type,
+    async def _request_auth_token(self):
+        try:
+            return await self.poll_status()
+        except (IHAuthenticationError, IHConnectionError) as exc:
+            _LOGGER.error("Error connecting to IntesisHome API: %s", exc)
+            raise
+
+    async def _open_command_channel(self):
+        _LOGGER.debug(
+            "Opening connection to %s API at %s:%i",
+            self._device_type,
+            self._cmd_server,
+            self._cmd_server_port,
+        )
+
+        try:
+            self._reader, self._writer = await asyncio.open_connection(
+                self._cmd_server, self._cmd_server_port
+            )
+        except (ConnectionRefusedError, Exception) as exc:  # pylint: disable=broad-except
+            _LOGGER.error(
+                "Connection to %s:%s failed with exception %s",
                 self._cmd_server,
                 self._cmd_server_port,
+                exc,
             )
-            try:
-                # Create asyncio socket
-                self._reader, self._writer = await asyncio.open_connection(
-                    self._cmd_server, self._cmd_server_port
-                )
+            self._connected = False
+            return
 
-                # pylint: disable=C0209
-                auth_msg = '{"command":"connect_req","data":{"token":%s}}' % (
-                    self._auth_token
-                )
-                self._receive_task = self._event_loop.create_task(self._data_received())
-                await self._send_command(auth_msg)
-                # Clear the OTP
-                self._auth_token = None
-                self._keepalive_task = self._event_loop.create_task(
-                    self._send_keepalive()
-                )
-            # Get authentication token over HTTP POST
-            except (  # pylint: disable=broad-except
-                ConnectionRefusedError,
-                Exception,
-            ) as exc:
-                _LOGGER.error(
-                    "Connection to %s:%s failed with exception %s",
-                    self._cmd_server,
-                    self._cmd_server_port,
-                    exc,
-                )
-                self._connected = False
-            self._connecting = False
+        # pylint: disable=C0209
+        auth_msg = '{"command":"connect_req","data":{"token":%s}}' % (
+            self._auth_token
+        )
+        self._receive_task = self._event_loop.create_task(self._data_received())
+        await self._send_command(auth_msg)
+        self._auth_token = None
+        self._keepalive_task = self._event_loop.create_task(self._send_keepalive())
 
     async def poll_status(self, sendcallback=False):
         """Public method to query IntesisHome for state of device.
